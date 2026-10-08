@@ -1,17 +1,15 @@
-// input.h - INPUT i projektträdet.
-// Läser kortets switchar (riktning) och knapp (start/omstart) med polling och debounce.
+// Author: Ardwan Al-Geilani
 
-#ifndef INPUT_H
-#define INPUT_H
+#ifndef INPUT_H // if not defined
+#define INPUT_H // define
 
-// Sparar nuvarande läge på switchar och knapp, anropas en gång vid start
+// initializes the input
 void input_init(void);
 
-// Önskad riktning: returnerar DIR_UP/DOWN/LEFT/RIGHT (se snake.h) när en
-// riktningsswitch slagits om, annars DIR_NONE
+// returns the direction selected by the player
 int input_get_direction(void);
 
-// Returnerar 1 en gång per knapptryckning
+// returns 1 when the button is pressed
 int input_button_pressed(void);
 
 #endif

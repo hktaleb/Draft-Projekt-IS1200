@@ -1,98 +1,148 @@
-// input.c - INPUT i projektträdet.
-// Kortet har bara en programmerbar knapp, så riktningarna styrs med switcharna SW0-SW3
-// och knappen används för start/omstart. Allt läses med polling från huvudloopen.
+// Author: Ardwan Al-Geilani
 
 #include "input.h"
-#include <stdint.h>
-#include "snake.h" // För DIR_UP, DIR_DOWN osv.
+#include "snake.h"
 
-#define SWITCH_ADDR 0x04000010 // Switcharna SW0-SW9
-#define BUTTON_ADDR 0x040000d0 // Den programmerbara knappen
+// addresses for the switches and button
+#define SWITCH_ADDR 0x04000010
+#define BUTTON_ADDR 0x040000d0
 
-#define DIRECTION_SWITCHES 4 // SW0-SW3 används för styrning
-
-// Hur många avläsningar i rad som måste ge samma värde innan det räknas (några ms)
+// number of identical readings required before accepting the input as stable
 #define DEBOUNCE_SAMPLES 5000
 
-// Debounce: håller koll på en insignal så att studsar (snabbt fladder) ignoreras
-typedef struct {
-    uint32_t stable;   // Senast godkända värde
-    uint32_t last_raw; // Senaste råa avläsning
-    int count;         // Antal avläsningar i rad med samma råvärde
-} debouncer;
+// switch debounce values
+static int stable_switches;
+static int last_switches;
+static int switch_count;
 
-// Vilken riktning varje switch styr (SW3 sitter längst till vänster på kortet)
-static const int switch_direction[DIRECTION_SWITCHES] = {
-    DIR_RIGHT, // SW0
-    DIR_DOWN,  // SW1
-    DIR_UP,    // SW2
-    DIR_LEFT,  // SW3
-};
+// button debounce values
+static int stable_button;
+static int last_button;
+static int button_count;
 
-// Knappstatus (avstudsad) och föregående knappstatus
-static debouncer switch_db;
-static debouncer button_db;
-static uint32_t previous_switches;
-static uint32_t previous_button;
+// previous accepted values
+static int previous_switches;
+static int previous_button;
 
-// ===================== Debounce =====================
+// reads the last four switches to the far right (SW0-SW3)
+static int read_switches(void){
+    volatile int *switches = (int*) SWITCH_ADDR;
+    return *switches & 0xF;
+}
 
-// Godkänner ett nytt värde först när det varit oförändrat i DEBOUNCE_SAMPLES avläsningar
-static uint32_t debounce(debouncer* d, uint32_t raw) {
-    if (raw != d->last_raw) {
-        d->last_raw = raw; // Värdet ändrades: börja räkna om
-        d->count = 0;
-    } else if (d->count < DEBOUNCE_SAMPLES) {
-        d->count++;        // Samma värde igen: räkna upp
-    } else {
-        d->stable = raw;   // Stabilt länge nog: godkänn
+// reads the button (the lower one)
+static int read_button(void){
+    volatile int *button = (int*) BUTTON_ADDR;
+    return *button & 0x1;
+}
+
+// initializes the input
+void input_init(void){
+    int switches = read_switches(); // puts the four switches in variable switches
+    int button = read_button(); // puts the button in variable button
+
+    stable_switches = switches; // declare them as stable
+    last_switches = switches; // save the latest values
+    switch_count = 0; // init this switch counter to zero
+
+    stable_button = button; // declare it as stable
+    last_button = button; // save the latest value
+    button_count = 0; // init this button counter to zero
+
+    previous_switches = switches; // save the previous accepted switch value
+    previous_button = button; // save the previous accepted button value
+}
+
+// returns a stable switch value
+static int debounce_switches(void){
+    int current = read_switches(); // the current values
+
+    // switch value changed
+    if(current != last_switches){ // checks if the current value is equal to the last value
+        last_switches = current; 
+        switch_count = 0;
+        return stable_switches; // this returns the old value 
     }
-    return d->stable;
+
+    // returns the stable switches, and increases counter
+    if(switch_count < DEBOUNCE_SAMPLES){
+        switch_count = switch_count + 1;
+        return stable_switches;
+    }
+
+    // if the switch_count is greater than 5000 then the current value will be stable
+    stable_switches = current;
+
+    return stable_switches; // returns the stable value
 }
 
-// ===================== Polling =====================
+// returns a stable button value
+static int debounce_button(void){
+    int current = read_button(); // the current value of the button
 
-// Läser SW0-SW3 (övriga switchar maskas bort)
-static uint32_t read_switches(void) {
-    return *(volatile uint32_t*)SWITCH_ADDR & ((1u << DIRECTION_SWITCHES) - 1);
+    // button value changed
+    if(current != last_button){ // checks if the current value is equal to the last value
+        last_button = current;
+        button_count = 0;
+        return stable_button; // this returns the old value 
+    }
+
+    // returns the stable button, and increases counter
+    if(button_count < DEBOUNCE_SAMPLES){
+        button_count = button_count + 1;
+        return stable_button;
+    }
+
+    // value has been stable long enough
+    stable_button = current;
+
+    return stable_button; // returns the stable value
 }
 
-// Läser knappen: 1 = nedtryckt
-static uint32_t read_button(void) {
-    return *(volatile uint32_t*)BUTTON_ADDR & 0x1;
-}
 
-void input_init(void) {
-    // Utgå från nuvarande läge så att inget räknas som en ändring vid start
-    uint32_t switches = read_switches();
-    uint32_t button = read_button();
+// returns the direction selected by the player
+int input_get_direction(void){
+    int current = debounce_switches();
 
-    switch_db = (debouncer){switches, switches, 0};
-    button_db = (debouncer){button, button, 0};
-    previous_switches = switches;
-    previous_button = button;
-}
+    // no switch has changed
+    if(current == previous_switches)
+        return DIR_NONE;
 
-// ===================== Önskad riktning =====================
+    int changed = current ^ previous_switches; // xor (which ones are different)
 
-int input_get_direction(void) {
-    uint32_t current = debounce(&switch_db, read_switches());
-    uint32_t changed = current ^ previous_switches; // XOR: 1 för varje switch som ändrats
     previous_switches = current;
 
-    // Första switchen som slagits om (åt valfritt håll) bestämmer riktningen
-    for (int sw = 0; sw < DIRECTION_SWITCHES; sw++) {
-        if (changed & (1u << sw))
-            return switch_direction[sw];
-    }
-    return DIR_NONE;
+    // SW0 controls right
+    if(changed & 0x1) // changed is anded with bit zero (0001), and if true it will go right
+        return DIR_RIGHT;
+
+    // SW1 controls down
+    if(changed & 0x2) // changed is anded with bit one (0010), and if true it will go down
+        return DIR_DOWN;
+
+    // SW2 controls up
+    if(changed & 0x4) // changed is anded with bit two (0100), and if true it will go up
+        return DIR_UP;
+
+    // SW3 controls left
+    if(changed & 0x8) // changed is anded with bit four (1000), and if true it will go left
+        return DIR_LEFT;
+
+    return DIR_NONE; // just a failsafe
 }
 
-// ===================== Knappen =====================
 
-int input_button_pressed(void) {
-    uint32_t current = debounce(&button_db, read_button());
-    int pressed = current && !previous_button; // Bara när knappen går från uppe till nere
+// returns 1 when the button is pressed
+int input_button_pressed(void){
+    int current = debounce_button();
+
+    // button changed from released to pressed
+    if(current == 1 && previous_button == 0){
+        previous_button = current;
+        return 1;
+    }
+
     previous_button = current;
-    return pressed;
+
+    return 0;
 }

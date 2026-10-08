@@ -1,80 +1,122 @@
-// timer.c - TIMER i projektträdet.
-// Timern löper ut en gång per spelsteg och ger då ett avbrott. Avbrottet sätter bara
-// en flagga (game tick); huvudloopen ser flaggan och kör ett spelsteg.
+// Author: Hussein Taleb
 
 #include "timer.h"
-#include <stdint.h>
 
-#define TIMER_BASE 0x04000020 // Timerns adress i DTEK-V:s minneskarta
+// timer address
+#define TIMER_BASE 0x04000020
 
-// Timerns register, räknat i ord (4 byte) från TIMER_BASE
-#define TIMER_STATUS  0 // Bit 0 = TO, sätts när timern löpt ut
-#define TIMER_CONTROL 1 // Start/stopp och inställningar
-#define TIMER_PERIODL 2 // Periodens låga 16 bitar
-#define TIMER_PERIODH 3 // Periodens höga 16 bitar
-#define TIMER_SNAPL   4 // Avläst räknarvärde, låga 16 bitar
-#define TIMER_SNAPH   5 // Avläst räknarvärde, höga 16 bitar
+// timer registers
+#define TIMER_STATUS  0
+#define TIMER_CONTROL 1
+#define TIMER_PERIODL 2
+#define TIMER_PERIODH 3
+#define TIMER_SNAPL   4
+#define TIMER_SNAPH   5
 
-// Bitar i kontrollregistret
-#define CTRL_ITO   0x1 // Ge avbrott när timern löper ut
-#define CTRL_CONT  0x2 // Börja om automatiskt (kontinuerligt läge)
-#define CTRL_START 0x4 // Starta timern
-#define CTRL_STOP  0x8 // Stoppa timern
+// timer control values
+#define CTRL_ITO   0x1
+#define CTRL_CONT  0x2
+#define CTRL_START 0x4
+#define CTRL_STOP  0x8
 
-#define TIMER_IRQ 16 // Timerns avbrottsnummer
+// timer interrupt number
+#define TIMER_IRQ 16
 
-// Finns i boot.S: slår på IRQ16 och avbrott globalt
+// enables interrupts
 extern void enable_interrupt(void);
 
-// Pekare till timerns register
-static volatile uint32_t* const timer = (volatile uint32_t*)TIMER_BASE;
+// pointer to the timer
+static volatile unsigned int *timer =
+    (volatile unsigned int *) TIMER_BASE;
 
-// Game tick-flagga: sätts av avbrottet, läses av huvudloopen.
-// volatile = måste läsas om varje gång, eftersom avbrottet kan ändra den när som helst.
+// becomes 1 when a timer interrupt occurs
 static volatile int tick_pending = 0;
 
-// ===================== Timerperiod och hastighetskontroll =====================
 
-void timer_set_period_ms(uint32_t period_ms) {
-    uint32_t period = period_ms * (TIMER_FREQ_HZ / 1000); // ms -> tick
+// changes the timer period
+void timer_set_period_ms(unsigned int period_ms)
+{
+    unsigned int period;
 
-    timer[TIMER_CONTROL] = CTRL_STOP; // Stoppa medan vi ändrar
-    // Timern räknar period+1 tick, därför -1. Perioden delas i två 16-bitarsdelar.
+    // convert milliseconds to timer ticks
+    period = period_ms * (TIMER_FREQ_HZ / 1000);
+
+    // stop the timer while changing the period
+    timer[TIMER_CONTROL] = CTRL_STOP;
+
+    // set the lower 16 bits
     timer[TIMER_PERIODL] = (period - 1) & 0xFFFF;
+
+    // set the upper 16 bits
     timer[TIMER_PERIODH] = ((period - 1) >> 16) & 0xFFFF;
-    timer[TIMER_STATUS] = 0; // Nollställ gammal timeout-flagga
-    tick_pending = 0;        // Släng ett eventuellt gammalt game tick
-    timer[TIMER_CONTROL] = CTRL_START | CTRL_CONT | CTRL_ITO; // Starta igen med avbrott
+
+    // clear old timeout
+    timer[TIMER_STATUS] = 0;
+
+    // clear old game tick
+    tick_pending = 0;
+
+    // start the timer with interrupts
+    timer[TIMER_CONTROL] = CTRL_START | CTRL_CONT | CTRL_ITO;
 }
 
-void timer_init(uint32_t period_ms) {
+
+// initializes the timer
+void timer_init(unsigned int period_ms)
+{
     timer_set_period_ms(period_ms);
-    enable_interrupt(); // Låt processorn ta emot timerns avbrott
+
+    // allow the processor to receive interrupts
+    enable_interrupt();
 }
 
-// ===================== Timerinterrupt =====================
 
-// Anropas automatiskt från boot.S vid avbrott, cause = avbrottsnummer
-void handle_interrupt(unsigned cause) {
-    if (cause == TIMER_IRQ) {      // Interruptidentifiering: kom avbrottet från timern?
-        timer[TIMER_STATUS] = 0;   // Interruptkvittering: annars kommer avbrottet direkt igen
-        tick_pending = 1;          // Game tick: säg till huvudloopen att köra ett spelsteg
+// handles timer interrupts
+void handle_interrupt(unsigned int cause)
+{
+    // check if the interrupt came from the timer
+    if (cause == TIMER_IRQ) {
+
+        // clear the timer interrupt
+        timer[TIMER_STATUS] = 0;
+
+        // tell the game that it is time for a new step
+        tick_pending = 1;
     }
 }
 
-// ===================== Game tick =====================
 
-int timer_take_tick(void) {
-    if (tick_pending) {
-        tick_pending = 0; // Markera steget som hanterat
+// returns 1 when a game tick is available
+int timer_take_tick(void)
+{
+    if (tick_pending == 1) {
+
+        // remove the game tick after reading it
+        tick_pending = 0;
+
         return 1;
     }
+
     return 0;
 }
 
-// ===================== Timerdata för random seed =====================
 
-uint32_t timer_snapshot(void) {
-    timer[TIMER_SNAPL] = 0; // En skrivning fryser räknarvärdet i snap-registren
-    return (timer[TIMER_SNAPH] << 16) | (timer[TIMER_SNAPL] & 0xFFFF); // Sätt ihop till 32 bitar
+// returns the current timer value
+unsigned int timer_snapshot(void)
+{
+    unsigned int low;
+    unsigned int high;
+    unsigned int value;
+
+    // save the current timer value in the snapshot registers
+    timer[TIMER_SNAPL] = 0;
+
+    // read the lower and upper parts
+    low = timer[TIMER_SNAPL];
+    high = timer[TIMER_SNAPH];
+
+    // combine the two 16-bit parts
+    value = (high << 16) | (low & 0xFFFF);
+
+    return value;
 }

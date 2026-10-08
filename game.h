@@ -1,16 +1,15 @@
-// game.h - GAME i projektträdet.
-// Tillståndsmaskinen (START, PLAYING, GAME_OVER) som styr spelet.
+// Author: Hussein Taleb
 
 #ifndef GAME_H
 #define GAME_H
 
-// Visar startskärmen, anropas en gång vid start
+// initializes the game and shows the start screen
 void game_init(void);
 
-// Speluppdatering: anropas varje varv i huvudloopen med det som lästs från Input och Timer
-//   direction      = önskad riktning eller DIR_NONE
-//   button_pressed = 1 om knappen just tryckts ned
-//   tick           = 1 om det är dags för ett spelsteg
+// updates the game
+// direction = selected direction or DIR_NONE
+// button_pressed = 1 if the button was pressed
+// tick = 1 if it is time to move the snake
 void game_update(int direction, int button_pressed, int tick);
 
 #endif

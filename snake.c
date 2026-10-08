@@ -1,122 +1,175 @@
-// snake.c - SNAKE i projektträdet.
-// Ormen lagras som en array av (X, Y)-positioner. Vid varje steg tar varje segment
-// föregående segments position och huvudet flyttas en cell i riktningen.
+// Author: Ardwan Al-Geilani
 
-#include "snake.h"
-#include <stdint.h>
-#include "vga.h"
+#include "snake.h" // include header file
 
-// Hur mycket X och Y ändras per steg i varje riktning
-static const position dir_delta[DIR_COUNT] = {
-    [DIR_UP]    = { 0, -1},
-    [DIR_DOWN]  = { 0,  1},
-    [DIR_LEFT]  = {-1,  0},
-    [DIR_RIGHT] = { 1,  0},
-};
+// segment-array: segments[0] is the head, segments[length - 1] is the tail
+static position segments[SNAKE_MAX_LEN]; // 1064 cells
+static int length; // the snakes length
 
-// Segment-array: segments[0] är huvudet, segments[length - 1] är svansen
-static position segments[SNAKE_MAX_LEN];
-static int length; // Längd: antal segment just nu
+// stores which grid cells are occupied by the snake, this includes the bounds
+static unsigned char occupied[GRID_HEIGHT][GRID_WIDTH];
 
-// 1 där ormen finns. Gör att vi direkt ser om en cell är upptagen
-// utan att behöva gå igenom hela segment-arrayen.
-static uint8_t occupied[GRID_HEIGHT][GRID_WIDTH];
+static int heading; // direction of the snake
+static int next_dir; // direction of the snakes next movement
 
-static int heading;  // Riktningen ormen rörde sig i senaste steget
-static int next_dir; // Riktningen ormen ska ta i nästa steg
-
-// ===================== Initialisering =====================
-
-void snake_init(void) {
-    // Töm rutnätet
+void snake_init(void){
+    // empty the grid-field
     for (int y = 0; y < GRID_HEIGHT; y++)
         for (int x = 0; x < GRID_WIDTH; x++)
             occupied[y][x] = 0;
 
-    // Ormen startar mitt på planen med huvudet längst till höger
+    // snake starts with 3 segments
     length = SNAKE_START_LEN;
-    for (int i = 0; i < length; i++) {
-        segments[i] = (position){GRID_WIDTH / 2 - i, GRID_HEIGHT / 2};
-        occupied[segments[i].y][segments[i].x] = 1;
+
+    // this loop places the snake in the middle of the grid-field
+    for (int i = 0; i < length; i++){
+
+        segments[i].x = GRID_WIDTH / 2 - i; // this part puts the head, body and tail one step after each on the x-axis
+        segments[i].y = GRID_HEIGHT / 2; // this part places everything on the y-axis
+
+        occupied[segments[i].y][segments[i].x] = 1; // mark as occupied
+
         if (i == 0)
-            vga_draw_snake_head(segments[i].x, segments[i].y);
+            vga_draw_snake_head(segments[i].x, segments[i].y); // draws the head of the snake at first index
         else
-            vga_draw_snake_body(segments[i].x, segments[i].y);
+            vga_draw_snake_body(segments[i].x, segments[i].y); // draws the rest of the body on other indexes
     }
 
-    heading = DIR_RIGHT;
-    next_dir = DIR_RIGHT;
+    // snake starts by moving right
+    heading = DIR_RIGHT; // where the snake is moving at the moment
+    next_dir = DIR_RIGHT; // where it will go afterwards
 }
 
-// ===================== Riktningsbyte och blockering av 180°-sväng =====================
+/* this function returns the opposite diretion which was defined at snake header file 
+    it is used for preventing turning the opposite direction*/
+int opposite_direction(int dir){
+    if (dir == DIR_UP) // if 0
+        return DIR_DOWN; // return 1
 
-void snake_set_direction(int dir) {
-    // Rakt bakåt skulle betyda att huvudet går in i kroppen direkt, så det ignoreras.
-    // Vi jämför med heading (senaste steget), så två snabba svängar kan inte lura spärren.
-    if (dir != DIR_NONE && dir != DIR_OPPOSITE(heading))
-        next_dir = dir;
+    if (dir == DIR_DOWN) // if 1
+        return DIR_UP; // return 0
+
+    if (dir == DIR_LEFT) // if 2
+        return DIR_RIGHT; // return 3
+
+    if (dir == DIR_RIGHT) // if 3
+        return DIR_LEFT; // return 2
+
+    return DIR_NONE; // if none of the above, return -1
 }
 
-// ===================== Rörelse och tillväxt =====================
+/* this function sets the next direction and also prevents turning 180 degrees */
+void snake_set_direction(int dir){
+    // no button was pressed so it does nothing
+    if (dir == DIR_NONE)
+        return;
 
-position snake_next_head(void) {
+    // does not allow the snake to turn backwards by doing nothing
+    if (dir == opposite_direction(heading))
+        return;
+
+    // if another value was given then it will be the next direction 
+    next_dir = dir;
+}
+
+/* eg. the snake starts at position (0,0) if it moves up it wil be (-1,0), 
+    this is from the vga file */
+position snake_next_head(void){
     position head = segments[0];
-    return (position){head.x + dir_delta[next_dir].x, head.y + dir_delta[next_dir].y};
+
+    if (next_dir == DIR_UP) // y will decrease if moving up
+        head.y = head.y - 1;
+
+    if (next_dir == DIR_DOWN) // y will increase if going down
+        head.y = head.y + 1;
+
+    if (next_dir == DIR_LEFT)
+        head.x = head.x - 1;
+
+    if (next_dir == DIR_RIGHT)
+        head.x = head.x + 1;
+
+    return head;
 }
 
-void snake_move(int grow) {
+/* this function moves the snake and/or increases the length of the snake */
+void snake_move(int grow){
     position old_head = segments[0];
     position old_tail = segments[length - 1];
     position new_head = snake_next_head();
+
+    // save the direction the snake is now moving in
     heading = next_dir;
 
-    if (grow && length < SNAKE_MAX_LEN) {
-        length++; // Tillväxt: den gamla svansen blir kvar som nytt sista segment
-    } else {
-        // Ingen tillväxt: svansen flyttar sig, så dess cell blir ledig
+    // if the snake eats an apple, increase its length
+    if (grow == 1 && length < SNAKE_MAX_LEN)
+        length = length + 1;
+    else{
+        // remove the old tail
         occupied[old_tail.y][old_tail.x] = 0;
         vga_erase_cell(old_tail.x, old_tail.y);
     }
 
-    // Varje segment tar föregående segments position, sedan flyttas huvudet
+    // move every body segment forward, but not the head
     for (int i = length - 1; i > 0; i--)
         segments[i] = segments[i - 1];
+
+    // move the head to its new position
     segments[0] = new_head;
+
+    // mark the new head position as occupied
     occupied[new_head.y][new_head.x] = 1;
 
-    // Rita bara det som ändrats: gamla huvudet blir kropp, nya huvudet ritas
-    vga_draw_snake_body(old_head.x, old_head.y);
+    // draw the snake
+    vga_draw_snake_body(old_head.x, old_head.y); // the old head becomes part of the body
     vga_draw_snake_head(new_head.x, new_head.y);
 }
 
-// ===================== Collision Detection =====================
+// collision with walls
+int snake_hits_wall(position p){
+    if (p.x <= 0) // the left wall
+        return 1;
 
-// Väggkollision: väggarna är den yttersta raden/kolumnen av celler
-int snake_hits_wall(position p) {
-    return p.x <= 0 || p.x >= GRID_WIDTH - 1 || p.y <= 0 || p.y >= GRID_HEIGHT - 1;
+    if (p.x >= GRID_WIDTH - 1) //  the right wall
+        return 1;
+
+    if (p.y <= 0) // the top
+        return 1;
+
+    if (p.y >= GRID_HEIGHT - 1) // the bottom
+        return 1;
+
+    return 0;
 }
 
-// Självkollision: går huvudet in i en cell som ormen redan täcker?
-int snake_hits_self(position p, int grow) {
+// collision with self
+int snake_hits_self(position p, int grow){
     position tail = segments[length - 1];
-    // Utan tillväxt flyttar svansen undan i samma steg, så dess cell räknas som ledig
-    if (!grow && p.x == tail.x && p.y == tail.y)
-        return 0;
-    return snake_occupies(p);
+
+    // if the snake is not growing, the tail will move away
+    if (grow == 0)
+        if (p.x == tail.x && p.y == tail.y)
+            return 0;
+
+    // check if the position is occupied by the snake
+    if (snake_occupies(p) == 1)
+        return 1;
+
+    return 0;
 }
 
-// ===================== Positionskontroll =====================
-
-int snake_occupies(position p) {
+// returns whether position p is occupied by the snake
+int snake_occupies(position p){
     return occupied[p.y][p.x];
 }
 
-// ===================== Längd och maxlängd =====================
-
-int snake_length(void) {
+// returns the current snake length
+int snake_length(void){
     return length;
 }
 
-int snake_is_full(void) {
+// returns whether the snake has reached its maximum length
+// 1 if true, else 0
+int snake_is_full(void){
     return length >= SNAKE_MAX_LEN;
 }

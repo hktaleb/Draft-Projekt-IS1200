@@ -1,51 +1,53 @@
-// snake.h - SNAKE i projektträdet.
-// Ormens position, segment, längd, riktning, rörelse, tillväxt och kollisioner.
+// Author: Ardwan Al-Geilani
 
-#ifndef SNAKE_H
-#define SNAKE_H
+#ifndef SNAKE_H // if not defined
+#define SNAKE_H // define
 
-#include <stdint.h>
-#include "vga.h"
 
-// Position X/Y i rutnätet (används av både ormen och äpplet)
-typedef struct {
-    int8_t x, y;
+#include "vga.h" // include header file
+
+// position x/y (used both by snake and apple)
+typedef struct{
+    int x;
+    int y;
 } position;
 
-// Direction. Ordningen gör att motsatt riktning fås med XOR 1 (UP<->DOWN, LEFT<->RIGHT).
-#define DIR_NONE  -1 // Ingen ny riktning
-#define DIR_UP     0
-#define DIR_DOWN   1
-#define DIR_LEFT   2
-#define DIR_RIGHT  3
-#define DIR_COUNT  4 // Antal riktningar
+// direction for snake
+#define DIR_NONE  -1 // no new direction
+#define DIR_UP     0 // snake moves up
+#define DIR_DOWN   1 // snake moves down
+#define DIR_LEFT   2 // snake moves left
+#define DIR_RIGHT  3 // snake moves right
+#define DIR_COUNT  4 // possible directions
 
-// Ger motsatt riktning, t.ex. DIR_OPPOSITE(DIR_UP) == DIR_DOWN
-#define DIR_OPPOSITE(d) ((d) ^ 1)
+// returns the opposite direction
+int opposite_direction(int dir); // This is used to prevent opposite change of direction
 
-// Maxlängd: ormen kan som mest fylla hela ytan innanför väggarna (38 x 28 celler)
+// maxlength: the snake can fill the entire area inside the walls
 #define SNAKE_MAX_LEN   PLAYFIELD_CELLS
 #define SNAKE_START_LEN 3
 
-// Initialisering: lägger ormen mitt på planen, riktad åt höger, och ritar den
+// initializes the snake in the middle of the board, facing right, and draws it
+// empties the grid-field
 void snake_init(void);
 
-// Riktningsbyte: tar emot önskad riktning, men blockerar 180-graderssväng
+// changes the snakes direction and prevents 180-degree turns
 void snake_set_direction(int dir);
 
-// Var huvudet hamnar i nästa steg
+// returns the position where the snakes head will be after the next move
 position snake_next_head(void);
 
-// Rörelse (och tillväxt om grow = 1): flyttar ormen ett steg och ritar om det som ändrats
+// moves the snake one step and redraws the changed parts.
+// if grow is 1, the snake also grows by one segment
 void snake_move(int grow);
 
-// Collision detection
-int snake_hits_wall(position p);           // Väggkollision
-int snake_hits_self(position p, int grow); // Självkollision
+// collision detection
+int snake_hits_wall(position p); // checks if the position collides with a wall
+int snake_hits_self(position p, int grow); // checks if the position collides with the snakes body
 
-// Positionskontroll: 1 om ormen täcker cellen p (p måste ligga på rutnätet)
+// returns 1 if the snake occupies the given position
 int snake_occupies(position p);
 
-int snake_length(void);
-int snake_is_full(void); // 1 om ormen nått maxlängd
+int snake_length(void); // returns the current length of the snake
+int snake_is_full(void); // returns 1 if the snake has reached its maximum length
 #endif
